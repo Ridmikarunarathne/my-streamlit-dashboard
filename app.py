@@ -14,6 +14,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+st.markdown("""
+<h1 style='text-align: center; color: #1e3a5f;'>
+A Predictive Modelling Approach to Analyse Sales Performance in a Filtered Bottle Shop
+</h1>
+""", unsafe_allow_html=True)
 
 # ── Custom CSS ────────────────────────────────────────────────────
 st.markdown("""
@@ -123,16 +128,18 @@ with st.sidebar:
     st.markdown("## 💧 Water Filter Shop")
     st.markdown("**Sales Forecasting Dashboard**")
     st.markdown("---")
+    st.markdown("**Name:** Ridmi Karunarathne")
     st.markdown("**Student ID:** 20221250")
     st.markdown("**Dataset:** 3,459 invoices")
     st.markdown("**Period:** Jan–Dec 2025")
     st.markdown("---")
     page = st.radio("Navigate", [
-        "📊 Overview & EDA",
-        "🤖 Model Comparison",
-        "🔮 Forecast",
-        "📈 Business Insights"
-    ])
+    "📊 Overview & EDA",
+    "🤖 Model Comparison",
+    "🔮 Forecast",
+    "📈 Business Insights",
+    "📊 Actual vs Predicted"   # <-- New page
+])
     st.markdown("---")
     st.markdown("**Best Model:** Prophet (Tuned)")
     st.markdown("**Best MAPE:** 3.72%")
@@ -534,3 +541,123 @@ elif page == "📈 Business Insights":
     > **Limitation:** Weekly data was produced by linear interpolation of monthly totals,
     not real weekly transaction records. Actual weekly data would improve forecast precision.
     """)
+    # ══════════════════════════════════════════════════════════════════
+# PAGE 5 — ACTUAL VS PREDICTED SALES
+# ══════════════════════════════════════════════════════════════════
+elif page == "📊 Actual vs Predicted":
+
+    st.markdown('<div class="main-header">📊 Actual vs Predicted Sales</div>', unsafe_allow_html=True)
+
+    # 1️⃣ Upload CSV
+    st.markdown("### 📁 Upload Your Sales Dataset (Optional)")
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file with columns: month, Total_Sale", type="csv"
+    )
+
+    # Use default data if no file is uploaded
+    if uploaded_file is not None:
+        df_used = pd.read_csv(uploaded_file)
+        st.success("Dataset loaded successfully!")
+    else:
+        df_used = df.copy()
+        st.info("Using default dataset.")
+
+    # 2️⃣ Prepare weekly series
+    month_map = {
+        'January':1,'February':2,'March':3,'April':4,
+        'May':5,'June':6,'July':7,'August':8,
+        'September':9,'October':10,'November':11,'December':12
+    }
+    df_used['month_num'] = df_used['month'].map(month_map)
+    df_used['date'] = pd.to_datetime({'year':2025,'month':df_used['month_num'],'day':1})
+    weekly_series = df_used.groupby('date')['Total_Sale'].sum().resample('W').mean().interpolate()
+
+    # 3️⃣ Historical chart
+    st.markdown("### 📌 Historical Sales Data")
+    fig_actual = go.Figure()
+    fig_actual.add_trace(go.Scatter(
+        x=weekly_series.index,
+        y=weekly_series.values,
+        mode='lines+markers',
+        name='Actual Sales',
+        line=dict(color='blue', width=2)
+    ))
+    fig_actual.update_layout(
+        title="Actual Weekly Sales",
+        xaxis_title="Date",
+        yaxis_title="Sales (LKR)"
+    )
+    st.plotly_chart(fig_actual, use_container_width=True, key="actual_chart")
+
+    # 4️⃣ Fit Prophet
+    from prophet import Prophet
+    train_p = pd.DataFrame({'ds': weekly_series.index, 'y': weekly_series.values})
+    prophet_model = Prophet(
+        changepoint_prior_scale=0.01,
+        seasonality_prior_scale=0.01,
+        yearly_seasonality=False,
+        weekly_seasonality=False,
+        daily_seasonality=False
+    )
+    prophet_model.fit(train_p)
+
+    # Forecast next 8 weeks
+    future = prophet_model.make_future_dataframe(periods=8, freq='W')
+    forecast = prophet_model.predict(future)
+    future_sel = forecast.tail(8)
+
+    # 5️⃣ Prophet Forecast chart
+    st.markdown("### 🔮 Prophet Model Forecast")
+    fig_forecast = go.Figure()
+    fig_forecast.add_trace(go.Scatter(
+        x=future_sel['ds'], y=future_sel['yhat'],
+        name='Forecast',
+        line=dict(color='green', width=2, dash='dash')
+    ))
+    fig_forecast.add_trace(go.Scatter(
+        x=pd.concat([future_sel['ds'], future_sel['ds'][::-1]]),
+        y=pd.concat([future_sel['yhat_upper'], future_sel['yhat_lower'][::-1]]),
+        fill='toself',
+        fillcolor='rgba(16,185,129,0.2)',
+        line=dict(color='rgba(255,255,255,0)'),
+        name='95% Confidence Interval'
+    ))
+    fig_forecast.update_layout(
+        title="Prophet Forecast — 95% Confidence Interval",
+        xaxis_title="Date",
+        yaxis_title="Sales (LKR)"
+    )
+    st.plotly_chart(fig_forecast, use_container_width=True, key="forecast_chart")
+
+    # 6️⃣ Optional: Bar + Line combo chart
+    st.markdown("### 📊 Weekly Sales — Bar vs Forecast Line")
+    fig_bar_line = go.Figure()
+    fig_bar_line.add_trace(go.Bar(
+        x=weekly_series.index,
+        y=weekly_series.values,
+        name='Actual Sales',
+        marker_color='blue',
+        opacity=0.6
+    ))
+    fig_bar_line.add_trace(go.Scatter(
+        x=future_sel['ds'],
+        y=future_sel['yhat'],
+        name='Forecast',
+        line=dict(color='green', width=3, dash='dash')
+    ))
+    fig_bar_line.add_trace(go.Scatter(
+        x=pd.concat([future_sel['ds'], future_sel['ds'][::-1]]),
+        y=pd.concat([future_sel['yhat_upper'], future_sel['yhat_lower'][::-1]]),
+        fill='toself',
+        fillcolor='rgba(16,185,129,0.2)',
+        line=dict(color='rgba(255,255,255,0)'),
+        name='95% CI'
+    ))
+    fig_bar_line.update_layout(
+        title="Weekly Sales (Bar) vs Prophet Forecast (Line)",
+        xaxis_title="Date",
+        yaxis_title="Sales (LKR)",
+        barmode='overlay',
+        plot_bgcolor='white'
+    )
+    st.plotly_chart(fig_bar_line, use_container_width=True, key="barline_chart")
